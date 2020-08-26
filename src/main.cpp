@@ -23,7 +23,7 @@
 #define SPK_IN (_IN(SPK1))
 
 // double click support
-#define OUT3_SUPPORT
+//#define OUT3_SUPPORT
 
 // extended settings
 #define EXT_SETTINGS

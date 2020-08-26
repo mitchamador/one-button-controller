@@ -9,3 +9,5 @@ src/main.exe
 .vscode/tasks.json
 .travis.yml
 one-button-controller.code-workspace
+proteus/*.pdsbak
+
