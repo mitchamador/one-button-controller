@@ -15,40 +15,66 @@
 
 #define OUT1 PB1
 #define OUT2 PB2
+#define OUT3 PB5
 
 #define SPK1 PB3
 #define SPK2 PB4
 
 #define SPK_IN (_IN(SPK1))
 
-// delays in 1ms resolution
-#define LONGKEY 1000
-#define DEBOUNCE 50
+// double click support
+#define OUT3_SUPPORT
+
+// extended settings
+#define EXT_SETTINGS
+
+// delays in 4ms resolution
+#define DELAY_10TH 25
+#define LONGKEY 250
+#define DEBOUNCE 10
+
+#ifdef OUT3_SUPPORT
+#define DOUBLE_CLICK_DELAY 100
+#endif
 
 // delays in 0,1s resolution
 #define STAGES_DELAY 200
 #define SETTINGS_DELAY 120
 
-#define EXT_SETTINGS
-//#define NAKED
-
-#ifdef EXT_SETTINGS
-#ifndef NAKED
-#define NAKED
+#ifndef OUT3_SUPPORT
+#define MAX_STAGE 3
+#define MAX_SETTINGS_STAGE_1 10
+#else
+#define MAX_STAGE 4
+#define MAX_SETTINGS_STAGE_1 12
 #endif
-#endif
 
+#ifndef OUT3_SUPPORT
 #define OUT_SETTINGS 0
 #define OUT1_MEMORY 1
 #define OUT2_MEMORY 2
 #define OUT1_SOUND 3
 #define OUT2_SOUND 4
+#else
+#define OUT1_MEMORY 0
+#define OUT2_MEMORY 1
+#define OUT3_MEMORY 2
+#define OUT1_SOUND 3
+#define OUT2_SOUND 4
+#define OUT3_SOUND 5
+#endif
 
 EEMEM uint8_t eSettings = 0;
 EEMEM uint8_t eTimer1 = 0;
 EEMEM uint8_t eTimer2 = 0;
+#ifdef OUT3_SUPPORT
+EEMEM uint8_t eTimer3 = 0;
+#endif
 EEMEM uint8_t eState1 = 0;
 EEMEM uint8_t eState2 = 0;
+#ifdef OUT3_SUPPORT
+EEMEM uint8_t eState3 = 0;
+#endif
 
 // timer array in 0,1 s resolution
 const unsigned int time[] PROGMEM = {
@@ -135,8 +161,11 @@ typedef struct
 
 outConfig out1;
 outConfig out2;
+#ifdef OUT3_SUPPORT
+outConfig out3;
+#else
 bool outSettings;
-
+#endif
 
 void BEEP_ON(uint8_t config)
 {
@@ -161,7 +190,7 @@ void BEEP_OFF(uint8_t config)
   }
 }
 
-void changeStateOut(outConfig* out, bool off)
+void changeStateOut(outConfig *out, bool off)
 {
   if (off || (PINB & (out->mask)))
   {
@@ -174,7 +203,7 @@ void changeStateOut(outConfig* out, bool off)
     // on
     PORTB |= out->mask;
     BEEP_ON(out->config);
-    out->counter = 100;
+    out->counter = 0;
   }
 
   if (MEM_ENABLED(out->config))
@@ -183,83 +212,111 @@ void changeStateOut(outConfig* out, bool off)
   }
 }
 
-void incrementTimer(outConfig *out) {
-    if ((PINB & out->mask) && out->tTimer != 0)
+void incrementTimer(outConfig *out)
+{
+  if ((PINB & out->mask) && out->tTimer != 0)
+  {
+    if (out->counter++ >= DELAY_10TH)
     {
-      if (out->counter < 100) {
-        out->counter++;
-        return;
-      }
       out->counter = 0;
       if (out->timeroff < 0xFFFF)
         out->timeroff++;
     }
-    else
-      out->timeroff = 0;
+  }
+  else
+    out->timeroff = 0;
 
-    if (out->timeroff > out->tTimer)
-    {
-      changeStateOut(out, true);
-    }
-
+  if (out->timeroff > out->tTimer)
+  {
+    changeStateOut(out, true);
+  }
 }
 
 // Timer 0 overflow interrupt service routine
-#ifdef NAKED
 ISR(TIM0_OVF_vect, ISR_NAKED)
-#else
-ISR(TIM0_OVF_vect)
-#endif
 {
-  static uint16_t counter = 0;
+  static uint8_t key_counter = 0;
+#ifdef OUT3_SUPPORT
+  static uint8_t double_click_counter = 0;
+#endif
 
   // Reinitialize Timer 0 value
-  TCNT0 = 0x6A;
+  TCNT0 = 0xB5;
 
-  // Place your code here
-
-  if (KEY) // если нажата кнопка
+  if (KEY) // key pressed
   {
-    if (counter <= LONGKEY)
+    if (key_counter <= LONGKEY)
     {
-      counter++;
+      key_counter++;
     }
-    if (counter == LONGKEY)
+    if (key_counter == LONGKEY)
     {
+      // long keypress
+#ifdef OUT3_SUPPORT
+      changeStateOut(&out1, false);
+      double_click_counter = 0;
+#else
       changeStateOut(outSettings ? &out1 : &out2, false);
-    }
-  }
-  else // если кнопка отжата
-  {
-    if (counter > 1)
-    {
-      if (counter > DEBOUNCE && counter < LONGKEY)
-      {
-        changeStateOut(outSettings ? &out2 : &out1, false);
-      }
-      counter = 0;
-    }
-
-    incrementTimer(&out1);
-    incrementTimer(&out2);
-
-  }
-#ifdef NAKED
-  reti();
 #endif
+    }
+  }
+  else // key released
+  {
+#ifdef OUT3_SUPPORT
+    if (double_click_counter > 0)
+    {
+      if (--double_click_counter == 0)
+      {
+        // single click
+        changeStateOut(&out2, false);
+      }
+    }
+#endif
+    if (key_counter > DEBOUNCE && key_counter < LONGKEY)
+    {
+#ifdef OUT3_SUPPORT
+      if (double_click_counter > 0)
+      {
+        double_click_counter = 0;
+        // double click
+        changeStateOut(&out3, false);
+        //BEEP_DOWN();
+        //BEEP_DOWN();
+        //BEEP_DOWN();
+      }
+      else
+      {
+        double_click_counter = DOUBLE_CLICK_DELAY;
+      }
+#else
+      // key press
+      changeStateOut(outSettings ? &out2 : &out1, false);
+#endif
+    }
+    key_counter = 0;
+  }
+  incrementTimer(&out1);
+  incrementTimer(&out2);
+#ifdef OUT3_SUPPORT
+  incrementTimer(&out3);
+#endif
+
+  reti();
 }
 
-
-void setOutSettings(outConfig *out, uint8_t config) {
+void setOutSettings(outConfig *out, uint8_t config)
+{
   out->config = config;
   out->tTimer = pgm_read_word(&time[eeprom_read_byte(out->eTimer)]);
 
   if (out->tTimer > 20)
   {
-  // when timer setting is more than 2 sec, use BEEP_UP()/BEEP_DOWN() when out is switched on/off
-  // otherwise use simple BEEP_OK() only when out is switched on
+    // when timer setting is more than 2 sec, use BEEP_UP()/BEEP_DOWN() when out is switched on/off
+    // otherwise use simple BEEP_OK() only when out is switched on
     out->config |= (1 << CONFIG_SOUND_TYPE);
-  } else {
+  }
+  else
+  {
     // disable memory when timer setting is 2 sec or lower
     out->config &= ~(1 << CONFIG_MEM_ENABLED);
   }
@@ -268,6 +325,7 @@ void setOutSettings(outConfig *out, uint8_t config) {
   if (MEM_ENABLED(out->config) && eeprom_read_byte(out->eState))
   {
     PORTB |= out->mask;
+    out->counter = 0;
   }
 }
 
@@ -290,23 +348,30 @@ int main(void)
 
   // Input/Output Ports initialization
   // Port B initialization
+#ifdef OUT3_SUPPORT
+  // Function: Bit5=Out Bit4=Out Bit3=Out Bit2=Out Bit1=Out Bit0=In
+  DDRB = (1 << DDB5) | (1 << DDB4) | (1 << DDB3) | (1 << DDB2) | (1 << DDB1) | (0 << DDB0);
+  // State: Bit5=0 Bit4=0 Bit3=0 Bit2=0 Bit1=0 Bit0=P
+  PORTB = (0 << PORTB5) | (0 << PORTB4) | (0 << PORTB3) | (0 << PORTB2) | (0 << PORTB1) | (1 << PORTB0);
+#else
   // Function: Bit5=In Bit4=Out Bit3=Out Bit2=Out Bit1=Out Bit0=In
   DDRB = (0 << DDB5) | (1 << DDB4) | (1 << DDB3) | (1 << DDB2) | (1 << DDB1) | (0 << DDB0);
   // State: Bit5=T Bit4=0 Bit3=0 Bit2=0 Bit1=0 Bit0=P
   PORTB = (0 << PORTB5) | (0 << PORTB4) | (0 << PORTB3) | (0 << PORTB2) | (0 << PORTB1) | (1 << PORTB0);
+#endif
 
-// Timer/Counter 0 initialization
-// Clock source: System Clock
-// Clock value: 150,000 kHz
-// Mode: Normal top=0xFF
-// OC0A output: Disconnected
-// OC0B output: Disconnected
-// Timer Period: 1 ms
-TCCR0A=(0<<COM0A1) | (0<<COM0A0) | (0<<COM0B1) | (0<<COM0B0) | (0<<WGM01) | (0<<WGM00);
-TCCR0B=(0<<WGM02) | (0<<CS02) | (1<<CS01) | (1<<CS00);
-TCNT0=0x6A;
-OCR0A=0x00;
-OCR0B=0x00;
+  // Timer/Counter 0 initialization
+  // Clock source: System Clock
+  // Clock value: 18,750 kHz
+  // Mode: Normal top=0xFF
+  // OC0A output: Disconnected
+  // OC0B output: Disconnected
+  // Timer Period: 4 ms
+  TCCR0A = (0 << COM0A1) | (0 << COM0A0) | (0 << COM0B1) | (0 << COM0B0) | (0 << WGM01) | (0 << WGM00);
+  TCCR0B = (0 << WGM02) | (0 << CS02) | (1 << CS01) | (1 << CS00);
+  TCNT0 = 0xB5;
+  OCR0A = 0x00;
+  OCR0B = 0x00;
 
   // Timer/Counter 0 Interrupt(s) initialization
   TIMSK0 = (0 << OCIE0B) | (0 << OCIE0A) | (1 << TOIE0);
@@ -347,7 +412,7 @@ OCR0B=0x00;
         {
           keytime = STAGES_DELAY;
           stage++;
-          if (stage > 3)
+          if (stage > MAX_STAGE)
             stage = 0;
           for (i = 0; i < stage; i++)
           {
@@ -359,7 +424,7 @@ OCR0B=0x00;
       if (stage > 0)
       {
         _delay_ms(10 * SETTINGS_DELAY);
-        max_settings = stage == 1 ? 10 : TIME_ARRAY_SIZE;
+        max_settings = stage == 1 ? MAX_SETTINGS_STAGE_1 : TIME_ARRAY_SIZE;
         stage_setting = 0;
         keytime = SETTINGS_DELAY;
         while (!KEY)
@@ -375,7 +440,6 @@ OCR0B=0x00;
             }
             else
             {
-
               do
               {
               } while (!KEY);
@@ -393,6 +457,7 @@ OCR0B=0x00;
           switch (stage)
           {
           case 1:
+#ifndef OUT3_SUPPORT
             // stage 1 settings depending on beep's count
             // 1 => key = OUT2, longkey = OUT1      (set OUT_SETTINGS)
             // 2 => key = OUT1, longkey = OUT2      (clear OUT_SETTINGS)
@@ -404,6 +469,21 @@ OCR0B=0x00;
             // 8 => OUT1 sound disabled             (clear OUT1_SOUND)
             // 9 => OUT2 sound enabled              (set OUT2_SOUND)
             // 10 => OUT2 sound disabled            (clear OUT2_SOUND)
+#else
+            // stage 1 settings depending on beep's count
+            // 1 => OUT1 memory enabled             (set OUT1_MEMORY)
+            // 2 => OUT1 memory disabled            (clear OUT1_MEMORY)
+            // 3 => OUT2 memory enabled             (set OUT2_MEMORY)
+            // 4 => OUT2 memory disabled            (clear OUT2_MEMORY)
+            // 5 => OUT3 memory enabled             (set OUT3_MEMORY)
+            // 6 => OUT3 memory disabled            (clear OUT3_MEMORY)
+            // 7 => OUT1 sound enabled              (set OUT1_SOUND)
+            // 8 => OUT1 sound disabled             (clear OUT1_SOUND)
+            // 9 => OUT2 sound enabled              (set OUT2_SOUND)
+            // 10 => OUT2 sound disabled            (clear OUT2_SOUND)
+            // 11 => OUT3 sound enabled             (set OUT3_SOUND)
+            // 12 => OUT3 sound disabled            (clear OUT3_SOUND)
+#endif
             tSettings = eeprom_read_byte(&eSettings);
             if ((stage_setting & 1) == 0)
             {
@@ -416,13 +496,18 @@ OCR0B=0x00;
             eeprom_write_byte(&eSettings, tSettings);
             break;
           case 2:
-            // stage 2 and stage3 (for OUT1 and OUT2 respectively)
+            // stage 2 and stage 3 (for OUT1 and OUT2 respectively)
             // timer settings depending on beep's count (index in time[] array)
             eeprom_write_byte(&eTimer1, stage_setting);
             break;
           case 3:
             eeprom_write_byte(&eTimer2, stage_setting);
             break;
+#ifdef OUT3_SUPPORT
+          case 4:
+            eeprom_write_byte(&eTimer3, stage_setting);
+            break;
+#endif
           }
         }
         do
@@ -444,7 +529,7 @@ OCR0B=0x00;
         if (--keytime == 0)
         {
           keytime = SETTINGS_DELAY;
-          if (stage_setting <= 10 + TIME_ARRAY_SIZE + TIME_ARRAY_SIZE)
+          if (stage_setting <= MAX_SETTINGS_STAGE_1 + (TIME_ARRAY_SIZE * (MAX_STAGE - 1)))
           {
             BEEP_OK();
             stage_setting++;
@@ -466,7 +551,7 @@ OCR0B=0x00;
 
         // save settings
         stage_setting--;
-        if (stage_setting < 10)
+        if (stage_setting < MAX_SETTINGS_STAGE_1)
         {
           tSettings = eeprom_read_byte(&eSettings);
           if ((stage_setting & 1) == 0)
@@ -479,14 +564,24 @@ OCR0B=0x00;
           }
           eeprom_write_byte(&eSettings, tSettings);
         }
-        else if (stage_setting < 10 + TIME_ARRAY_SIZE)
+        else if (stage_setting < MAX_SETTINGS_STAGE_1 + TIME_ARRAY_SIZE * 1)
         {
-          eeprom_write_byte(&eTimer1, stage_setting - 10);
+          eeprom_write_byte(&eTimer1, stage_setting - MAX_SETTINGS_STAGE_1 - TIME_ARRAY_SIZE * 0);
         }
+#ifdef OUT3_SUPPORT
+        else if (stage_setting < MAX_SETTINGS_STAGE_1 + TIME_ARRAY_SIZE * 2)
+#else
+        else
+#endif
+        {
+          eeprom_write_byte(&eTimer2, stage_setting - MAX_SETTINGS_STAGE_1 - TIME_ARRAY_SIZE * 1);
+        }
+#ifdef OUT3_SUPPORT
         else
         {
-          eeprom_write_byte(&eTimer2, stage_setting - 10 - TIME_ARRAY_SIZE);
+          eeprom_write_byte(&eTimer3, stage_setting - MAX_SETTINGS_STAGE_1 - TIME_ARRAY_SIZE * 2);
         }
+#endif
       }
       do
       {
@@ -504,12 +599,24 @@ OCR0B=0x00;
   out2.mask = 1 << OUT2;
   out2.eTimer = &eTimer2;
   out2.eState = &eState2;
-  
+
+#ifdef OUT3_SUPPORT
+  out3.mask = 1 << OUT3;
+  out3.eTimer = &eTimer2;
+  out3.eState = &eState2;
+#endif
+
+#ifndef OUT3_SUPPORT
   outSettings = tSettings & (1 << OUT_SETTINGS);
+#endif
 
   setOutSettings(&out1, (tSettings >> 0) & ((1 << OUT1_SOUND) | (1 << OUT1_MEMORY)));
 
   setOutSettings(&out2, (tSettings >> 1) & ((1 << OUT1_SOUND) | (1 << OUT1_MEMORY)));
+
+#ifdef OUT3_SUPPORT
+  setOutSettings(&out3, (tSettings >> 2) & ((1 << OUT1_SOUND) | (1 << OUT1_MEMORY)));
+#endif
 
   // Global enable interrupts
   sei();
