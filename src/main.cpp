@@ -124,7 +124,7 @@ typedef struct
   uint16_t tTimer;
   uint16_t timeroff;
   uint8_t config;
-  uint8_t bit;
+  uint8_t mask;
   uint8_t *eTimer;
   uint8_t *eState;
 } outConfig;
@@ -159,27 +159,27 @@ void BEEP_OFF(uint8_t config)
 
 void changeStateOut(outConfig* out, bool off)
 {
-  if (off || _IN(out->bit))
+  if (off || (PINB & (out->mask)))
   {
     // off
-    _CLEAR(out->bit);
+    PORTB &= ~out->mask;
     BEEP_OFF(out->config);
   }
   else
   {
     // on
-    _SET(out->bit);
+    PORTB |= out->mask;
     BEEP_ON(out->config);
   }
 
   if (MEM_ENABLED(out->config))
   {
-    eeprom_write_byte(out->eState, _IN(out->bit));
+    eeprom_write_byte(out->eState, (PINB & out->mask));
   }
 }
 
 void incrementTimer(outConfig *out) {
-    if (_IN(out->bit) && out->tTimer != 0)
+    if ((PINB & out->mask) && out->tTimer != 0)
     {
       if (out->timeroff < 0xFFFF)
         out->timeroff++;
@@ -256,7 +256,7 @@ void setOutSettings(outConfig *out, uint8_t config) {
   // switch on out when memory is enabled and saved state is on
   if (MEM_ENABLED(out->config) && eeprom_read_byte(out->eState))
   {
-    _SET(out->bit);
+    PORTB |= out->mask;
   }
 }
 
@@ -486,11 +486,11 @@ int main(void)
 
   tSettings = eeprom_read_byte(&eSettings);
 
-  out1.bit = OUT1;
+  out1.mask = 1 << OUT1;
   out1.eTimer = &eTimer1;
   out1.eState = &eState1;
 
-  out2.bit = OUT2;
+  out2.mask = 1 << OUT2;
   out2.eTimer = &eTimer2;
   out2.eState = &eState2;
   
