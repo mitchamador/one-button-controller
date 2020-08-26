@@ -21,7 +21,10 @@
 
 #define SPK_IN (_IN(SPK1))
 
+// delays in 0,1 sec resolution
 #define LONGKEY 10
+#define STAGES_DELAY 200
+#define SETTINGS_DELAY 120
 
 #define EXT_SETTINGS
 //#define NAKED
@@ -118,12 +121,18 @@ void BEEP_OK(void)
 
 typedef struct
 {
-  uint16_t tTimer1, tTimer2;
-  uint8_t config1, config2;
-  bool outSettings;
-} params;
+  uint16_t tTimer;
+  uint16_t timeroff;
+  uint8_t config;
+  uint8_t bit;
+  uint8_t *eTimer;
+  uint8_t *eState;
+} outConfig;
 
-params p;
+outConfig out1;
+outConfig out2;
+bool outSettings;
+
 
 void BEEP_ON(uint8_t config)
 {
@@ -148,46 +157,41 @@ void BEEP_OFF(uint8_t config)
   }
 }
 
-void changeStateOut1(params *pp, bool off)
+void changeStateOut(outConfig* out, bool off)
 {
-  if (off || _IN(OUT1))
+  if (off || _IN(out->bit))
   {
     // off
-    _CLEAR(OUT1);
-    BEEP_OFF(pp->config1);
+    _CLEAR(out->bit);
+    BEEP_OFF(out->config);
   }
   else
   {
     // on
-    _SET(OUT1);
-    BEEP_ON(pp->config1);
+    _SET(out->bit);
+    BEEP_ON(out->config);
   }
 
-  if (MEM_ENABLED(pp->config1))
+  if (MEM_ENABLED(out->config))
   {
-    eeprom_write_byte(&eState1, _IN(OUT1));
+    eeprom_write_byte(out->eState, _IN(out->bit));
   }
 }
 
-void changeStateOut2(params *pp, bool off)
-{
-  if (off || _IN(OUT2))
-  {
-    // off
-    _CLEAR(OUT2);
-    BEEP_OFF(pp->config2);
-  }
-  else
-  {
-    // on
-    _SET(OUT2);
-    BEEP_ON(pp->config2);
-  }
+void incrementTimer(outConfig *out) {
+    if (_IN(out->bit) && out->tTimer != 0)
+    {
+      if (out->timeroff < 0xFFFF)
+        out->timeroff++;
+    }
+    else
+      out->timeroff = 0;
 
-  if (MEM_ENABLED(pp->config2))
-  {
-    eeprom_write_byte(&eState2, _IN(OUT2));
-  }
+    if (out->timeroff > out->tTimer)
+    {
+      changeStateOut(out, true);
+    }
+
 }
 
 // Timer 0 overflow interrupt service routine
@@ -198,9 +202,6 @@ ISR(TIM0_OVF_vect)
 #endif
 {
   static uint8_t counter = 0;
-  static uint16_t timeroff1 = 0, timeroff2 = 0;
-
-  params *pp = &p;
 
   // Reinitialize Timer 0 value
   TCNT0 = 0x8B;
@@ -215,14 +216,7 @@ ISR(TIM0_OVF_vect)
     }
     if (counter == LONGKEY)
     {
-      if (pp->outSettings)
-      {
-        changeStateOut1(pp, false);
-      }
-      else
-      {
-        changeStateOut2(pp, false);
-      }
+      changeStateOut(outSettings ? &out1 : &out2, false);
     }
   }
   else // если кнопка отжата
@@ -231,49 +225,43 @@ ISR(TIM0_OVF_vect)
     {
       if (counter < LONGKEY)
       {
-        if (pp->outSettings)
-        {
-          changeStateOut2(pp, false);
-        }
-        else
-        {
-          changeStateOut1(pp, false);
-        }
+      changeStateOut(outSettings ? &out2 : &out1, false);
       }
       counter = 0;
     }
-    if (_IN(OUT1) && pp->tTimer1 != 0)
-    {
-      if (timeroff1 < 0xFFFF)
-        timeroff1++;
-    }
-    else
-      timeroff1 = 0;
-    if (_IN(OUT2) && pp->tTimer2 != 0)
-    {
-      if (timeroff2 < 0xFFFF)
-        timeroff2++;
-    }
-    else
-      timeroff2 = 0;
 
-    if (timeroff1 > pp->tTimer1)
-    {
-      changeStateOut1(pp, true);
-    }
-    if (timeroff2 > pp->tTimer2)
-    {
-      changeStateOut2(pp, true);
-    }
+    incrementTimer(&out1);
+    incrementTimer(&out2);
+
   }
 #ifdef NAKED
   reti();
 #endif
 }
 
+
+void setOutSettings(outConfig *out, uint8_t config) {
+  out->config = config;
+  out->tTimer = pgm_read_word(&time[eeprom_read_byte(out->eTimer)]);
+  if (out->tTimer > 20)
+  {
+  // when timer setting is more than 2 sec, use BEEP_UP()/BEEP_DOWN() when out is switched on/off
+  // otherwise use simple BEEP_OK() only when out is switched on
+    out->config |= (1 << CONFIG_SOUND_TYPE);
+  } else {
+    // disable memory when timer setting is 2 sec or lower
+    out->config &= ~(1 << CONFIG_MEM_ENABLED);
+  }
+
+  // switch on out when memory is enabled and saved state is on
+  if (MEM_ENABLED(out->config) && eeprom_read_byte(out->eState))
+  {
+    _SET(out->bit);
+  }
+}
+
 int main(void)
 {
-  params *pp = &p;
 
   // Declare your local variables here
   uint8_t keytime;
@@ -340,13 +328,13 @@ int main(void)
     while (1)
     {
       stage = 0;
-      keytime = 200;
+      keytime = STAGES_DELAY;
       while (KEY)
       {
         _delay_ms(10);
         if (--keytime == 0)
         {
-          keytime = 200;
+          keytime = STAGES_DELAY;
           stage++;
           if (stage > 3)
             stage = 0;
@@ -359,16 +347,16 @@ int main(void)
       }
       if (stage > 0)
       {
-        _delay_ms(1500);
+        _delay_ms(10 * SETTINGS_DELAY);
         max_settings = stage == 1 ? 10 : TIME_ARRAY_SIZE;
         stage_setting = 0;
-        keytime = 150;
+        keytime = SETTINGS_DELAY;
         while (!KEY)
         {
           _delay_ms(10);
           if (--keytime == 0)
           {
-            keytime = 150;
+            keytime = SETTINGS_DELAY;
             if (stage_setting < max_settings)
             {
               BEEP_OK();
@@ -438,13 +426,13 @@ int main(void)
     while (1)
     {
       stage_setting = 0;
-      keytime = 150;
+      keytime = SETTINGS_DELAY;
       while (KEY)
       {
         _delay_ms(10);
         if (--keytime == 0)
         {
-          keytime = 150;
+          keytime = SETTINGS_DELAY;
           if (stage_setting <= 10 + TIME_ARRAY_SIZE + TIME_ARRAY_SIZE)
           {
             BEEP_OK();
@@ -486,7 +474,7 @@ int main(void)
         }
         else
         {
-          eeprom_write_byte(&eTimer2, stage_setting - 10 - 17);
+          eeprom_write_byte(&eTimer2, stage_setting - 10 - TIME_ARRAY_SIZE);
         }
       }
       do
@@ -498,40 +486,19 @@ int main(void)
 
   tSettings = eeprom_read_byte(&eSettings);
 
-  pp->outSettings = tSettings & (1 << OUT_SETTINGS);
+  out1.bit = OUT1;
+  out1.eTimer = &eTimer1;
+  out1.eState = &eState1;
 
-  pp->config1 = ((tSettings >> 0) & ((1 << OUT1_SOUND) | (1 << OUT1_MEMORY)));
-  pp->config2 = ((tSettings >> 1) & ((1 << OUT1_SOUND) | (1 << OUT1_MEMORY)));
+  out2.bit = OUT2;
+  out2.eTimer = &eTimer2;
+  out2.eState = &eState2;
+  
+  outSettings = tSettings & (1 << OUT_SETTINGS);
 
-  pp->tTimer1 = pgm_read_word(&time[eeprom_read_byte(&eTimer1)]);
-  if (pp->tTimer1 > 20)
-  {
-  // when timer setting is more than 2 sec, use BEEP_UP()/BEEP_DOWN() when out is switched on/off
-  // otherwise use simple BEEP_OK() only when out is switched on
-    pp->config1 |= (1 << CONFIG_SOUND_TYPE);
-  } else {
-    // disable memory when timer setting is 2 sec or lower
-    pp->config1 &= ~(1 << CONFIG_MEM_ENABLED);
-  }
+  setOutSettings(&out1, (tSettings >> 0) & ((1 << OUT1_SOUND) | (1 << OUT1_MEMORY)));
 
-  pp->tTimer2 = pgm_read_word(&time[eeprom_read_byte(&eTimer2)]);
-  if (pp->tTimer2 > 20)
-  {
-    pp->config2 |= (1 << CONFIG_SOUND_TYPE);
-  } else {
-    pp->config2 &= ~(1 << CONFIG_MEM_ENABLED);
-  }
-
-  // switch on out when memory is enabled and saved state is on
-  if (MEM_ENABLED(pp->config1) && eeprom_read_byte(&eState1))
-  {
-    _SET(OUT1);
-  }
-
-  if (MEM_ENABLED(pp->config2) && eeprom_read_byte(&eState2))
-  {
-    _SET(OUT2);
-  }
+  setOutSettings(&out2, (tSettings >> 1) & ((1 << OUT1_SOUND) | (1 << OUT1_MEMORY)));
 
   // Global enable interrupts
   sei();
