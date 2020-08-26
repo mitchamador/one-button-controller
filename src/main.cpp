@@ -21,8 +21,11 @@
 
 #define SPK_IN (_IN(SPK1))
 
-// delays in 0,1 sec resolution
-#define LONGKEY 10
+// delays in 1ms resolution
+#define LONGKEY 1000
+#define DEBOUNCE 50
+
+// delays in 0,1s resolution
 #define STAGES_DELAY 200
 #define SETTINGS_DELAY 120
 
@@ -123,6 +126,7 @@ typedef struct
 {
   uint16_t tTimer;
   uint16_t timeroff;
+  uint8_t counter;
   uint8_t config;
   uint8_t mask;
   uint8_t *eTimer;
@@ -170,6 +174,7 @@ void changeStateOut(outConfig* out, bool off)
     // on
     PORTB |= out->mask;
     BEEP_ON(out->config);
+    out->counter = 100;
   }
 
   if (MEM_ENABLED(out->config))
@@ -181,6 +186,11 @@ void changeStateOut(outConfig* out, bool off)
 void incrementTimer(outConfig *out) {
     if ((PINB & out->mask) && out->tTimer != 0)
     {
+      if (out->counter < 100) {
+        out->counter++;
+        return;
+      }
+      out->counter = 0;
       if (out->timeroff < 0xFFFF)
         out->timeroff++;
     }
@@ -201,16 +211,16 @@ ISR(TIM0_OVF_vect, ISR_NAKED)
 ISR(TIM0_OVF_vect)
 #endif
 {
-  static uint8_t counter = 0;
+  static uint16_t counter = 0;
 
   // Reinitialize Timer 0 value
-  TCNT0 = 0x8B;
+  TCNT0 = 0x6A;
 
   // Place your code here
 
   if (KEY) // если нажата кнопка
   {
-    if (counter != 255)
+    if (counter <= LONGKEY)
     {
       counter++;
     }
@@ -223,9 +233,9 @@ ISR(TIM0_OVF_vect)
   {
     if (counter > 1)
     {
-      if (counter < LONGKEY)
+      if (counter > DEBOUNCE && counter < LONGKEY)
       {
-      changeStateOut(outSettings ? &out2 : &out1, false);
+        changeStateOut(outSettings ? &out2 : &out1, false);
       }
       counter = 0;
     }
@@ -243,6 +253,7 @@ ISR(TIM0_OVF_vect)
 void setOutSettings(outConfig *out, uint8_t config) {
   out->config = config;
   out->tTimer = pgm_read_word(&time[eeprom_read_byte(out->eTimer)]);
+
   if (out->tTimer > 20)
   {
   // when timer setting is more than 2 sec, use BEEP_UP()/BEEP_DOWN() when out is switched on/off
@@ -284,18 +295,18 @@ int main(void)
   // State: Bit5=T Bit4=0 Bit3=0 Bit2=0 Bit1=0 Bit0=P
   PORTB = (0 << PORTB5) | (0 << PORTB4) | (0 << PORTB3) | (0 << PORTB2) | (0 << PORTB1) | (1 << PORTB0);
 
-  // Timer/Counter 0 initialization
-  // Clock source: System Clock
-  // Clock value: 1,172 kHz
-  // Mode: Normal top=0xFF
-  // OC0A output: Disconnected
-  // OC0B output: Disconnected
-  // Timer Period: 99,84 ms
-  TCCR0A = (0 << COM0A1) | (0 << COM0A0) | (0 << COM0B1) | (0 << COM0B0) | (0 << WGM01) | (0 << WGM00);
-  TCCR0B = (0 << WGM02) | (1 << CS02) | (0 << CS01) | (1 << CS00);
-  TCNT0 = 0x8B;
-  OCR0A = 0x00;
-  OCR0B = 0x00;
+// Timer/Counter 0 initialization
+// Clock source: System Clock
+// Clock value: 150,000 kHz
+// Mode: Normal top=0xFF
+// OC0A output: Disconnected
+// OC0B output: Disconnected
+// Timer Period: 1 ms
+TCCR0A=(0<<COM0A1) | (0<<COM0A0) | (0<<COM0B1) | (0<<COM0B0) | (0<<WGM01) | (0<<WGM00);
+TCCR0B=(0<<WGM02) | (0<<CS02) | (1<<CS01) | (1<<CS00);
+TCNT0=0x6A;
+OCR0A=0x00;
+OCR0B=0x00;
 
   // Timer/Counter 0 Interrupt(s) initialization
   TIMSK0 = (0 << OCIE0B) | (0 << OCIE0A) | (1 << TOIE0);
