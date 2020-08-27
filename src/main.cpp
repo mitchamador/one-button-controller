@@ -399,137 +399,39 @@ int main(void)
   ADCSRA = (0 << ADEN) | (0 << ADSC) | (0 << ADATE) | (0 << ADIF) | (0 << ADIE) | (0 << ADPS2) | (0 << ADPS1) | (0 << ADPS0);
 
 #ifdef EXT_SETTINGS
-  if (KEY)
+  while (KEY)
   {
-    while (1)
+    stage = 0;
+    keytime = STAGES_DELAY;
+    while (KEY)
     {
-      stage = 0;
-      keytime = STAGES_DELAY;
-      while (KEY)
+      _delay_ms(10);
+      if (--keytime == 0)
       {
-        _delay_ms(10);
-        if (--keytime == 0)
-        {
-          keytime = STAGES_DELAY;
-          stage++;
-          if (stage > MAX_STAGE)
-            stage = 0;
-          for (i = 0; i < stage; i++)
-          {
-            BEEP_UP();
-            _delay_ms(150);
-          }
-        }
-      }
-      if (stage > 0)
-      {
-        _delay_ms(10 * SETTINGS_DELAY);
-        max_settings = stage == 1 ? MAX_SETTINGS_STAGE_1 : TIME_ARRAY_SIZE;
-        stage_setting = 0;
-        keytime = SETTINGS_DELAY;
-        while (!KEY)
-        {
-          _delay_ms(10);
-          if (--keytime == 0)
-          {
-            keytime = SETTINGS_DELAY;
-            if (stage_setting < max_settings)
-            {
-              BEEP_OK();
-              stage_setting++;
-            }
-            else
-            {
-              do
-              {
-              } while (!KEY);
-              stage_setting = 0;
-            }
-          }
-        }
-        if (KEY && stage_setting > 0)
+        keytime = STAGES_DELAY;
+        stage++;
+        if (stage > MAX_STAGE)
+          stage = 0;
+        for (i = 0; i < stage; i++)
         {
           BEEP_UP();
-          BEEP_UP();
-          BEEP_UP();
-          // save settings
-          stage_setting--;
-          switch (stage)
-          {
-          case 1:
-#ifndef OUT3_SUPPORT
-            // stage 1 settings depending on beep's count
-            // 1 => key = OUT2, longkey = OUT1      (set OUT_SETTINGS)
-            // 2 => key = OUT1, longkey = OUT2      (clear OUT_SETTINGS)
-            // 3 => OUT1 memory enabled             (set OUT1_MEMORY)
-            // 4 => OUT1 memory disabled            (clear OUT1_MEMORY)
-            // 5 => OUT2 memory enabled             (set OUT2_MEMORY)
-            // 6 => OUT2 memory disabled            (clear OUT2_MEMORY)
-            // 7 => OUT1 sound enabled              (set OUT1_SOUND)
-            // 8 => OUT1 sound disabled             (clear OUT1_SOUND)
-            // 9 => OUT2 sound enabled              (set OUT2_SOUND)
-            // 10 => OUT2 sound disabled            (clear OUT2_SOUND)
-#else
-            // stage 1 settings depending on beep's count
-            // 1 => OUT1 memory enabled             (set OUT1_MEMORY)
-            // 2 => OUT1 memory disabled            (clear OUT1_MEMORY)
-            // 3 => OUT2 memory enabled             (set OUT2_MEMORY)
-            // 4 => OUT2 memory disabled            (clear OUT2_MEMORY)
-            // 5 => OUT3 memory enabled             (set OUT3_MEMORY)
-            // 6 => OUT3 memory disabled            (clear OUT3_MEMORY)
-            // 7 => OUT1 sound enabled              (set OUT1_SOUND)
-            // 8 => OUT1 sound disabled             (clear OUT1_SOUND)
-            // 9 => OUT2 sound enabled              (set OUT2_SOUND)
-            // 10 => OUT2 sound disabled            (clear OUT2_SOUND)
-            // 11 => OUT3 sound enabled             (set OUT3_SOUND)
-            // 12 => OUT3 sound disabled            (clear OUT3_SOUND)
-#endif
-            tSettings = eeprom_read_byte(&eSettings);
-            if ((stage_setting & 1) == 0)
-            {
-              tSettings |= (1 << (stage_setting >> 1));
-            }
-            else
-            {
-              tSettings &= ~(1 << (stage_setting >> 1));
-            }
-            eeprom_write_byte(&eSettings, tSettings);
-            break;
-          case 2:
-            // stage 2 and stage 3 (for OUT1 and OUT2 respectively)
-            // timer settings depending on beep's count (index in time[] array)
-            eeprom_write_byte(&eTimer1, stage_setting);
-            break;
-          case 3:
-            eeprom_write_byte(&eTimer2, stage_setting);
-            break;
-#ifdef OUT3_SUPPORT
-          case 4:
-            eeprom_write_byte(&eTimer3, stage_setting);
-            break;
-#endif
-          }
+          _delay_ms(150);
         }
-        do
-        {
-        } while (!KEY);
       }
     }
-  }
-#else
-  if (KEY)
-  {
-    while (1)
+    if (stage > 0)
     {
+      _delay_ms(10 * SETTINGS_DELAY);
+      max_settings = stage == 1 ? MAX_SETTINGS_STAGE_1 : TIME_ARRAY_SIZE;
       stage_setting = 0;
       keytime = SETTINGS_DELAY;
-      while (KEY)
+      while (!KEY)
       {
         _delay_ms(10);
         if (--keytime == 0)
         {
           keytime = SETTINGS_DELAY;
-          if (stage_setting <= MAX_SETTINGS_STAGE_1 + (TIME_ARRAY_SIZE * (MAX_STAGE - 1)))
+          if (stage_setting < max_settings)
           {
             BEEP_OK();
             stage_setting++;
@@ -538,21 +440,48 @@ int main(void)
           {
             do
             {
-            } while (KEY);
+            } while (!KEY);
             stage_setting = 0;
           }
         }
       }
-      if (!KEY && stage_setting > 0)
+      if (KEY && stage_setting > 0)
       {
         BEEP_UP();
         BEEP_UP();
         BEEP_UP();
-
         // save settings
         stage_setting--;
-        if (stage_setting < MAX_SETTINGS_STAGE_1)
+        switch (stage)
         {
+        case 1:
+#ifndef OUT3_SUPPORT
+          // stage 1 settings depending on beep's count
+          // 1 => key = OUT2, longkey = OUT1      (set OUT_SETTINGS)
+          // 2 => key = OUT1, longkey = OUT2      (clear OUT_SETTINGS)
+          // 3 => OUT1 memory enabled             (set OUT1_MEMORY)
+          // 4 => OUT1 memory disabled            (clear OUT1_MEMORY)
+          // 5 => OUT2 memory enabled             (set OUT2_MEMORY)
+          // 6 => OUT2 memory disabled            (clear OUT2_MEMORY)
+          // 7 => OUT1 sound enabled              (set OUT1_SOUND)
+          // 8 => OUT1 sound disabled             (clear OUT1_SOUND)
+          // 9 => OUT2 sound enabled              (set OUT2_SOUND)
+          // 10 => OUT2 sound disabled            (clear OUT2_SOUND)
+#else
+          // stage 1 settings depending on beep's count
+          // 1 => OUT1 memory enabled             (set OUT1_MEMORY)
+          // 2 => OUT1 memory disabled            (clear OUT1_MEMORY)
+          // 3 => OUT2 memory enabled             (set OUT2_MEMORY)
+          // 4 => OUT2 memory disabled            (clear OUT2_MEMORY)
+          // 5 => OUT3 memory enabled             (set OUT3_MEMORY)
+          // 6 => OUT3 memory disabled            (clear OUT3_MEMORY)
+          // 7 => OUT1 sound enabled              (set OUT1_SOUND)
+          // 8 => OUT1 sound disabled             (clear OUT1_SOUND)
+          // 9 => OUT2 sound enabled              (set OUT2_SOUND)
+          // 10 => OUT2 sound disabled            (clear OUT2_SOUND)
+          // 11 => OUT3 sound enabled             (set OUT3_SOUND)
+          // 12 => OUT3 sound disabled            (clear OUT3_SOUND)
+#endif
           tSettings = eeprom_read_byte(&eSettings);
           if ((stage_setting & 1) == 0)
           {
@@ -563,26 +492,91 @@ int main(void)
             tSettings &= ~(1 << (stage_setting >> 1));
           }
           eeprom_write_byte(&eSettings, tSettings);
-        }
-        else if (stage_setting < MAX_SETTINGS_STAGE_1 + TIME_ARRAY_SIZE * 1)
-        {
-          eeprom_write_byte(&eTimer1, stage_setting - MAX_SETTINGS_STAGE_1 - TIME_ARRAY_SIZE * 0);
-        }
+          break;
+        case 2:
+          // stage 2 and stage 3 (for OUT1 and OUT2 respectively)
+          // timer settings depending on beep's count (index in time[] array)
+          eeprom_write_byte(&eTimer1, stage_setting);
+          break;
+        case 3:
+          eeprom_write_byte(&eTimer2, stage_setting);
+          break;
 #ifdef OUT3_SUPPORT
-        else if (stage_setting < MAX_SETTINGS_STAGE_1 + TIME_ARRAY_SIZE * 2)
-#else
-        else
+        case 4:
+          eeprom_write_byte(&eTimer3, stage_setting);
+          break;
 #endif
-        {
-          eeprom_write_byte(&eTimer2, stage_setting - MAX_SETTINGS_STAGE_1 - TIME_ARRAY_SIZE * 1);
         }
-#ifdef OUT3_SUPPORT
-        else
+        do
         {
-          eeprom_write_byte(&eTimer3, stage_setting - MAX_SETTINGS_STAGE_1 - TIME_ARRAY_SIZE * 2);
-        }
-#endif
+        } while (!KEY);
       }
+    }
+  }
+#else
+  while (KEY)
+  {
+    stage_setting = 0;
+    keytime = SETTINGS_DELAY;
+    while (KEY)
+    {
+      _delay_ms(10);
+      if (--keytime == 0)
+      {
+        keytime = SETTINGS_DELAY;
+        if (stage_setting <= MAX_SETTINGS_STAGE_1 + (TIME_ARRAY_SIZE * (MAX_STAGE - 1)))
+        {
+          BEEP_OK();
+          stage_setting++;
+        }
+        else
+        {
+          do
+          {
+          } while (KEY);
+          stage_setting = 0;
+        }
+      }
+    }
+    if (!KEY && stage_setting > 0)
+    {
+      BEEP_UP();
+      BEEP_UP();
+      BEEP_UP();
+
+      // save settings
+      stage_setting--;
+      if (stage_setting < MAX_SETTINGS_STAGE_1)
+      {
+        tSettings = eeprom_read_byte(&eSettings);
+        if ((stage_setting & 1) == 0)
+        {
+          tSettings |= (1 << (stage_setting >> 1));
+        }
+        else
+        {
+          tSettings &= ~(1 << (stage_setting >> 1));
+        }
+        eeprom_write_byte(&eSettings, tSettings);
+      }
+      else if (stage_setting < MAX_SETTINGS_STAGE_1 + TIME_ARRAY_SIZE * 1)
+      {
+        eeprom_write_byte(&eTimer1, stage_setting - MAX_SETTINGS_STAGE_1 - TIME_ARRAY_SIZE * 0);
+      }
+#ifdef OUT3_SUPPORT
+      else if (stage_setting < MAX_SETTINGS_STAGE_1 + TIME_ARRAY_SIZE * 2)
+#else
+      else
+#endif
+      {
+        eeprom_write_byte(&eTimer2, stage_setting - MAX_SETTINGS_STAGE_1 - TIME_ARRAY_SIZE * 1);
+      }
+#ifdef OUT3_SUPPORT
+      else
+      {
+        eeprom_write_byte(&eTimer3, stage_setting - MAX_SETTINGS_STAGE_1 - TIME_ARRAY_SIZE * 2);
+      }
+#endif
       do
       {
       } while (!KEY);
