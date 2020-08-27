@@ -450,6 +450,11 @@ int main(void)
         BEEP_UP();
         BEEP_UP();
         BEEP_UP();
+        
+        do
+        {
+        } while (KEY);
+
         // save settings
         stage_setting--;
         switch (stage)
