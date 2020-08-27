@@ -8,6 +8,6 @@ src/main.exe
 .vscode/extensions.json
 .vscode/tasks.json
 .travis.yml
-one-button-controller.code-workspace
+*.code-workspace
 proteus/*.pdsbak
-
+proteus/*.workspace
