@@ -15,73 +15,85 @@
 
 #define OUT1 PB1
 #define OUT2 PB2
+// double click support
+#if defined(OUT3_ENABLE)
 #define OUT3 PB5
+#endif
 
 #define SPK1 PB3
 #define SPK2 PB4
 
 #define SPK_IN (_IN(SPK1))
 
-// double click support
-//#define OUT3_SUPPORT
-
 // extended settings
 #define EXT_SETTINGS
 
+#define TIMER_RESOLUTION 0.004f
 // delays in 4ms resolution
-#define DELAY_10TH 25
-#define LONGKEY 250
-#define DEBOUNCE 10
+#define DELAY_10TH ((uint8_t) (0.1f / TIMER_RESOLUTION))
+// long keypress
+#define LONGKEY ((uint8_t) (1.0f / TIMER_RESOLUTION))
+// debounce delay
+#define DEBOUNCE ((uint8_t) (0.04f / TIMER_RESOLUTION))
 
-#ifdef OUT3_SUPPORT
-#define DOUBLE_CLICK_DELAY 100
-#endif
+// delays in 0,01s resolution
+#define STAGES_DELAY ((uint8_t) (2.0f / 0.01f))
+#define SETTINGS_DELAY ((uint8_t) (1.2f / 0.01f))
 
-// delays in 0,1s resolution
-#define STAGES_DELAY 200
-#define SETTINGS_DELAY 120
+#ifndef OUT3
 
-#ifndef OUT3_SUPPORT
 #define MAX_STAGE 3
 #define MAX_SETTINGS_STAGE_1 10
-#else
-#define MAX_STAGE 4
-#define MAX_SETTINGS_STAGE_1 12
-#endif
 
-#ifndef OUT3_SUPPORT
 #define OUT_SETTINGS 0
 #define OUT1_MEMORY 1
 #define OUT2_MEMORY 2
 #define OUT1_SOUND 3
 #define OUT2_SOUND 4
+
+#define CONFIG_MEM_MASK (1 << 1)
+#define CONFIG_SOUND_MASK (1 << 3)
+
 #else
+
+#define DOUBLE_CLICK_DELAY 100
+
+#define MAX_STAGE 4
+#define MAX_SETTINGS_STAGE_1 12
+
 #define OUT1_MEMORY 0
 #define OUT2_MEMORY 1
 #define OUT3_MEMORY 2
 #define OUT1_SOUND 3
 #define OUT2_SOUND 4
 #define OUT3_SOUND 5
+
+#define CONFIG_MEM_MASK (1 << 0)
+#define CONFIG_SOUND_MASK (1 << 3)
 #endif
+
+#define SETTINGS_MASK (CONFIG_MEM_MASK | CONFIG_SOUND_MASK)
 
 EEMEM uint8_t eSettings = 0;
 EEMEM uint8_t eTimer1 = 0;
 EEMEM uint8_t eTimer2 = 0;
-#ifdef OUT3_SUPPORT
+#ifdef OUT3
 EEMEM uint8_t eTimer3 = 0;
 #endif
 EEMEM uint8_t eState1 = 0;
 EEMEM uint8_t eState2 = 0;
-#ifdef OUT3_SUPPORT
+#ifdef OUT3
 EEMEM uint8_t eState3 = 0;
 #endif
 
 // timer array in 0,1 s resolution
 const unsigned int time[] PROGMEM = {
+#define TIMER_UNLIMITED 0
     0xFFFF, // unlimited
     2,      // 0,2s
     5,      // 0,5s
     10,     // 1s
+#define TIMER_2SEC      4
     20,     // 2s
     300,    // 30s
     600,    // 1m
@@ -140,38 +152,34 @@ void BEEP_OK(void)
   BEEP(15, 255);
 }
 
-#define CONFIG_SOUND_TYPE 0
-#define CONFIG_MEM_ENABLED OUT1_MEMORY
-#define CONFIG_SOUND_ENABLED OUT1_SOUND
-
-#define SOUND_TYPE(config) (config & (1 << CONFIG_SOUND_TYPE))
-#define MEM_ENABLED(config) (config & (1 << CONFIG_MEM_ENABLED))
-#define SOUND_ENABLED(config) (config & (1 << CONFIG_SOUND_ENABLED))
+#define MEM_ENABLED(config) (config & (1 << CONFIG_MEM_MASK))
+#define SOUND_ENABLED(config) (config & (1 << CONFIG_SOUND_MASK))
 
 typedef struct
 {
   uint16_t tTimer;
-  uint16_t timeroff;
-  uint8_t counter;
   uint8_t config;
   uint8_t mask;
-  uint8_t *eTimer;
-  uint8_t *eState;
+  uint8_t eTimer;
+  uint8_t eState;
 } outConfig;
 
 outConfig out1;
 outConfig out2;
-#ifdef OUT3_SUPPORT
+#ifdef OUT3
 outConfig out3;
 #else
 bool outSettings;
 #endif
 
-void BEEP_ON(uint8_t config)
+void BEEP_ON(outConfig *out)
 {
-  if (SOUND_ENABLED(config))
+
+  if (SOUND_ENABLED(out->config))
   {
-    if (SOUND_TYPE(config))
+    // when timer setting is more than 2 sec, use BEEP_UP()/BEEP_DOWN() when out is switched on/off
+    // otherwise use simple BEEP_OK() only when out is switched on
+    if (out->eTimer == TIMER_UNLIMITED || out->eTimer > TIMER_2SEC)
     {
       BEEP_UP();
     }
@@ -182,63 +190,70 @@ void BEEP_ON(uint8_t config)
   }
 }
 
-void BEEP_OFF(uint8_t config)
+void BEEP_OFF(outConfig *out)
 {
-  if ((config & ((1 << CONFIG_SOUND_ENABLED) | (1 << CONFIG_SOUND_TYPE))) == ((1 << CONFIG_SOUND_ENABLED) | (1 << CONFIG_SOUND_TYPE)))
+  if (SOUND_ENABLED(out->config) && (out->eTimer == TIMER_UNLIMITED || out->eTimer > TIMER_2SEC))
   {
     BEEP_DOWN();
   }
 }
 
-void changeStateOut(outConfig *out, bool off)
+#define ON_MEM     2
+#define ON         1
+#define OFF        0
+
+void changeStateOut(outConfig *out, uint8_t state)
 {
-  if (off || (PINB & (out->mask)))
+  if ((state == OFF) || (PINB & (out->mask)))
   {
     // off
     PORTB &= ~out->mask;
-    BEEP_OFF(out->config);
+    BEEP_OFF(out);
   }
   else
   {
     // on
     PORTB |= out->mask;
-    BEEP_ON(out->config);
-    out->counter = 0;
+    out->tTimer = pgm_read_word(&time[out->eTimer]);
+    if (state == ON) {
+      BEEP_ON(out);
+    }
   }
 
-  if (MEM_ENABLED(out->config))
+  if (MEM_ENABLED(out->config) && state != ON_MEM)
   {
-    eeprom_write_byte(out->eState, (PINB & out->mask));
+    uint8_t eeState;
+    if (out == &out1) {
+      eeState = eState1;
+    } else if (out == &out2) {
+      eeState = eState2;
+#if defined(OUT3)
+    } else if (out == &out3) {
+      eeState = eState3;
+#endif
+    }
+    eeprom_write_byte(&eeState, (PINB & out->mask) != 0 ? 1 : 0);
   }
 }
 
-void incrementTimer(outConfig *out)
+void timeout(outConfig *out)
 {
-  if ((PINB & out->mask) && out->tTimer != 0)
+  if (out->eTimer != TIMER_UNLIMITED && (PINB & out->mask) && --out->tTimer == 0)
   {
-    if (out->counter++ >= DELAY_10TH)
-    {
-      out->counter = 0;
-      if (out->timeroff < 0xFFFF)
-        out->timeroff++;
-    }
-  }
-  else
-    out->timeroff = 0;
-
-  if (out->timeroff > out->tTimer)
-  {
-    changeStateOut(out, true);
+    changeStateOut(out, OFF);
   }
 }
 
 // Timer 0 overflow interrupt service routine
 ISR(TIM0_OVF_vect, ISR_NAKED)
 {
+  static uint8_t counter10 = DELAY_10TH;
   static uint8_t key_counter = 0;
-#ifdef OUT3_SUPPORT
+#ifdef OUT3
   static uint8_t double_click_counter = 0;
 #endif
+
+  outConfig *out = NULL;
 
   // Reinitialize Timer 0 value
   TCNT0 = 0xB5;
@@ -252,37 +267,34 @@ ISR(TIM0_OVF_vect, ISR_NAKED)
     if (key_counter == LONGKEY)
     {
       // long keypress
-#ifdef OUT3_SUPPORT
-      changeStateOut(&out1, false);
+#ifdef OUT3
+      out = &out1;
       double_click_counter = 0;
 #else
-      changeStateOut(outSettings ? &out1 : &out2, false);
+      out = outSettings ? &out1 : &out2;
 #endif
     }
   }
   else // key released
   {
-#ifdef OUT3_SUPPORT
+#ifdef OUT3
     if (double_click_counter > 0)
     {
       if (--double_click_counter == 0)
       {
         // single click
-        changeStateOut(&out2, false);
+        out = &out2;
       }
     }
 #endif
     if (key_counter > DEBOUNCE && key_counter < LONGKEY)
     {
-#ifdef OUT3_SUPPORT
+#ifdef OUT3
       if (double_click_counter > 0)
       {
         double_click_counter = 0;
         // double click
-        changeStateOut(&out3, false);
-        //BEEP_DOWN();
-        //BEEP_DOWN();
-        //BEEP_DOWN();
+        out = &out3;
       }
       else
       {
@@ -290,16 +302,25 @@ ISR(TIM0_OVF_vect, ISR_NAKED)
       }
 #else
       // key press
-      changeStateOut(outSettings ? &out2 : &out1, false);
+      out = outSettings ? &out2 : &out1;
 #endif
     }
     key_counter = 0;
   }
-  incrementTimer(&out1);
-  incrementTimer(&out2);
-#ifdef OUT3_SUPPORT
-  incrementTimer(&out3);
+  
+  if (--counter10 == 0) {
+    counter10 = DELAY_10TH;
+
+    if (out != NULL) {
+      changeStateOut(out, ON);
+    }
+
+    timeout(&out1);
+    timeout(&out2);
+#ifdef OUT3
+    timeout(&out3);
 #endif
+  }
 
   reti();
 }
@@ -307,25 +328,19 @@ ISR(TIM0_OVF_vect, ISR_NAKED)
 void setOutSettings(outConfig *out, uint8_t config)
 {
   out->config = config;
-  out->tTimer = pgm_read_word(&time[eeprom_read_byte(out->eTimer)]);
 
-  if (out->tTimer > 20)
+  if (out->eTimer != TIMER_UNLIMITED)
   {
-    // when timer setting is more than 2 sec, use BEEP_UP()/BEEP_DOWN() when out is switched on/off
-    // otherwise use simple BEEP_OK() only when out is switched on
-    out->config |= (1 << CONFIG_SOUND_TYPE);
+    // disable memory when timer setting is not unlimited
+    out->config &= ~(CONFIG_MEM_MASK);
   }
   else
   {
-    // disable memory when timer setting is 2 sec or lower
-    out->config &= ~(1 << CONFIG_MEM_ENABLED);
-  }
-
-  // switch on out when memory is enabled and saved state is on
-  if (MEM_ENABLED(out->config) && eeprom_read_byte(out->eState))
-  {
-    PORTB |= out->mask;
-    out->counter = 0;
+    // switch on out when memory is enabled and saved state is on
+    if (MEM_ENABLED(out->config) && out->eState != 0)
+    {
+      changeStateOut(out, ON_MEM);
+    }
   }
 }
 
@@ -348,7 +363,7 @@ int main(void)
 
   // Input/Output Ports initialization
   // Port B initialization
-#ifdef OUT3_SUPPORT
+#ifdef OUT3
   // Function: Bit5=Out Bit4=Out Bit3=Out Bit2=Out Bit1=Out Bit0=In
   DDRB = (1 << DDB5) | (1 << DDB4) | (1 << DDB3) | (1 << DDB2) | (1 << DDB1) | (0 << DDB0);
   // State: Bit5=0 Bit4=0 Bit3=0 Bit2=0 Bit1=0 Bit0=P
@@ -460,7 +475,7 @@ int main(void)
         switch (stage)
         {
         case 1:
-#ifndef OUT3_SUPPORT
+#ifndef OUT3
           // stage 1 settings depending on beep's count
           // 1 => key = OUT2, longkey = OUT1      (set OUT_SETTINGS)
           // 2 => key = OUT1, longkey = OUT2      (clear OUT_SETTINGS)
@@ -506,7 +521,7 @@ int main(void)
         case 3:
           eeprom_write_byte(&eTimer2, stage_setting);
           break;
-#ifdef OUT3_SUPPORT
+#ifdef OUT3
         case 4:
           eeprom_write_byte(&eTimer3, stage_setting);
           break;
@@ -568,7 +583,7 @@ int main(void)
       {
         eeprom_write_byte(&eTimer1, stage_setting - MAX_SETTINGS_STAGE_1 - TIME_ARRAY_SIZE * 0);
       }
-#ifdef OUT3_SUPPORT
+#ifdef OUT3
       else if (stage_setting < MAX_SETTINGS_STAGE_1 + TIME_ARRAY_SIZE * 2)
 #else
       else
@@ -576,7 +591,7 @@ int main(void)
       {
         eeprom_write_byte(&eTimer2, stage_setting - MAX_SETTINGS_STAGE_1 - TIME_ARRAY_SIZE * 1);
       }
-#ifdef OUT3_SUPPORT
+#ifdef OUT3
       else
       {
         eeprom_write_byte(&eTimer3, stage_setting - MAX_SETTINGS_STAGE_1 - TIME_ARRAY_SIZE * 2);
@@ -592,29 +607,29 @@ int main(void)
   tSettings = eeprom_read_byte(&eSettings);
 
   out1.mask = 1 << OUT1;
-  out1.eTimer = &eTimer1;
-  out1.eState = &eState1;
+  out1.eTimer = eeprom_read_byte(&eTimer1);
+  out1.eState = eeprom_read_byte(&eState1);
 
   out2.mask = 1 << OUT2;
-  out2.eTimer = &eTimer2;
-  out2.eState = &eState2;
+  out2.eTimer = eeprom_read_byte(&eTimer2);
+  out2.eState = eeprom_read_byte(&eState2);
 
-#ifdef OUT3_SUPPORT
+#ifdef OUT3
   out3.mask = 1 << OUT3;
-  out3.eTimer = &eTimer2;
-  out3.eState = &eState2;
+  out3.eTimer = eeprom_read_byte(&eTimer2);
+  out3.eState = eeprom_read_byte(&eState2);
 #endif
 
-#ifndef OUT3_SUPPORT
+#ifndef OUT3
   outSettings = tSettings & (1 << OUT_SETTINGS);
 #endif
 
-  setOutSettings(&out1, (tSettings >> 0) & ((1 << OUT1_SOUND) | (1 << OUT1_MEMORY)));
+  setOutSettings(&out1, (tSettings >> 0) & SETTINGS_MASK);
 
-  setOutSettings(&out2, (tSettings >> 1) & ((1 << OUT1_SOUND) | (1 << OUT1_MEMORY)));
+  setOutSettings(&out2, (tSettings >> 1) & SETTINGS_MASK);
 
-#ifdef OUT3_SUPPORT
-  setOutSettings(&out3, (tSettings >> 2) & ((1 << OUT1_SOUND) | (1 << OUT1_MEMORY)));
+#ifdef OUT3
+  setOutSettings(&out3, (tSettings >> 2) & SETTINGS_MASK);
 #endif
 
   // Global enable interrupts
