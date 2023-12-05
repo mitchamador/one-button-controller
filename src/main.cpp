@@ -140,11 +140,11 @@ void BEEP_OK(void)
   BEEP(15, 255);
 }
 
-#define CONFIG_SOUND_TYPE 0
+#define CONFIG_SOUND_UPDOWN 0
 #define CONFIG_MEM_ENABLED OUT1_MEMORY
 #define CONFIG_SOUND_ENABLED OUT1_SOUND
 
-#define SOUND_TYPE(config) (config & (1 << CONFIG_SOUND_TYPE))
+#define SOUND_UPDOWN(config) (config & (1 << CONFIG_SOUND_UPDOWN))
 #define MEM_ENABLED(config) (config & (1 << CONFIG_MEM_ENABLED))
 #define SOUND_ENABLED(config) (config & (1 << CONFIG_SOUND_ENABLED))
 
@@ -171,7 +171,7 @@ void BEEP_ON(uint8_t config)
 {
   if (SOUND_ENABLED(config))
   {
-    if (SOUND_TYPE(config))
+    if (SOUND_UPDOWN(config))
     {
       BEEP_UP();
     }
@@ -184,7 +184,7 @@ void BEEP_ON(uint8_t config)
 
 void BEEP_OFF(uint8_t config)
 {
-  if ((config & ((1 << CONFIG_SOUND_ENABLED) | (1 << CONFIG_SOUND_TYPE))) == ((1 << CONFIG_SOUND_ENABLED) | (1 << CONFIG_SOUND_TYPE)))
+  if (SOUND_ENABLED(config) && SOUND_UPDOWN(config))
   {
     BEEP_DOWN();
   }
@@ -313,11 +313,11 @@ void setOutSettings(outConfig *out, uint8_t config)
   {
     // when timer setting is more than 2 sec, use BEEP_UP()/BEEP_DOWN() when out is switched on/off
     // otherwise use simple BEEP_OK() only when out is switched on
-    out->config |= (1 << CONFIG_SOUND_TYPE);
+    out->config |= (1 << CONFIG_SOUND_UPDOWN);
   }
-  else
+  if (out->tTimer != 0xFFFF)
   {
-    // disable memory when timer setting is 2 sec or lower
+    // disable memory when timer setting is not unlimited
     out->config &= ~(1 << CONFIG_MEM_ENABLED);
   }
 
