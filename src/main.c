@@ -1,11 +1,13 @@
+#ifndef F_CPU
+#define F_CPU 1200000L
+#endif
+
 #include <avr/io.h>
 #include <avr/interrupt.h>
 #include <util/delay.h>
 #include <avr/eeprom.h>
 #include <avr/sleep.h>
 #include <avr/pgmspace.h>
-
-// Declare your global variables here
 
 #define _IN(bit) (PINB & _BV(bit))
 #define _SET(bit) (PORTB |= (1 << bit))
