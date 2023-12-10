@@ -143,15 +143,18 @@ const uint8_t settings_stage_1[][2] PROGMEM = {
 #define MEM_ENABLED(out) (out->config & CONFIG_MEMORY_MASK)
 #define SOUND_ENABLED(out) (out->config & CONFIG_SOUND_MASK)
 
-EEMEM uint8_t eSettings = 0;
-EEMEM uint8_t eTimer1 = 0;
-EEMEM uint8_t eTimer2 = 0;
-EEMEM uint8_t eState1 = 0;
-EEMEM uint8_t eState2 = 0;
-#if defined(OUT3)
-EEMEM uint8_t eTimer3 = 0;
-EEMEM uint8_t eState3 = 0;
-#endif
+
+typedef struct {
+  uint8_t settings;
+  uint8_t eTimer[3];
+  uint8_t eState[3];
+} tEepromConfig;
+
+EEMEM tEepromConfig eConfig = {
+  ((1 << OUT_SOUND) << OUT2_SETTINGS_SHIFT) | (((0 << OUT_MEMORY2) | (1 << OUT_MEMORY1)) << OUT2_SETTINGS_SHIFT),
+  {1, 0, 0},
+  {0, 0, 0}
+};
 
 // timer array in 0,1 s resolution
 const uint16_t time[] PROGMEM = {
@@ -183,6 +186,37 @@ const uint16_t start_time[] PROGMEM = {
 };
 
 #define TIME_ARRAY_SIZE sizeof(time) / sizeof(time[0])
+
+typedef enum {
+  INDEX_OUT1=0,
+  INDEX_OUT2,
+#if defined(OUT3)
+  INDEX_OUT3
+#endif  
+} t_out_index;
+
+typedef struct
+{
+  uint16_t tTimer;
+  uint16_t timeroff;
+  uint8_t counter;
+  uint8_t config;
+  uint8_t mask;
+  uint8_t *eState;
+#if !defined(OUT3)  
+  uint16_t sTimer;
+#endif 
+} outConfig;
+
+outConfig out1;
+outConfig out2;
+#if defined(OUT3)
+outConfig out3;
+#endif
+
+#if !defined(OUT3)
+uint8_t swapOutputs;
+#endif
 
 void BEEP(uint8_t tone, uint8_t length)
 {
@@ -224,27 +258,6 @@ void BEEP_OK(void)
 {
   BEEP(15, 255);
 }
-
-typedef struct
-{
-  uint16_t tTimer;
-  uint16_t timeroff;
-  uint8_t counter;
-  uint8_t config;
-  uint8_t mask;
-  uint8_t *eState;
-#if !defined(OUT3)  
-  uint16_t sTimer;
-#endif 
-} outConfig;
-
-outConfig out1;
-outConfig out2;
-#if defined(OUT3)
-outConfig out3;
-#else
-uint8_t swapOutputs;
-#endif
 
 void BEEP_ON(outConfig *out)
 {
@@ -396,17 +409,17 @@ ISR(TIM0_OVF_vect, ISR_NAKED)
   reti();
 }
 
-void setOutputSettings(outConfig *out, uint8_t config, uint8_t mask, uint8_t *eState, uint8_t *eTimer)
+void setOutputSettings(outConfig *out, uint8_t config, uint8_t mask, uint8_t index)
 {
   out->mask = mask;
-  out->eState = eState;
+  out->eState = &eConfig.eState[index];
 
   out->config = config;
-  out->tTimer = pgm_read_word(&time[eeprom_read_byte(eTimer)]);
+  out->tTimer = pgm_read_word(&time[eeprom_read_byte(&eConfig.eTimer[index])]);
 
   // switch on out when memory is enabled (and saved state is on for unlimited timer)
 #if !defined(OUT3)
-  if (/*MEM_ENABLED(out) && */(out->tTimer != 0xFFFF || eeprom_read_byte(eState))) {
+  if (/*MEM_ENABLED(out) && */(out->tTimer != 0xFFFF || eeprom_read_byte(&eConfig.eState[index]))) {
     out->sTimer = pgm_read_word(&start_time[config & CONFIG_MEMORY_MASK]);
   }
 #else
@@ -541,28 +554,41 @@ int main(void)
 
         // save settings
         stage_setting--;
-
+#if 1
+        uint8_t *eeAddr;
+        if (stage == 1) {
+          tSettings = eeprom_read_byte(&eConfig.settings);
+          tSettings &= settings_stage_1[stage_setting][0];
+          tSettings |= settings_stage_1[stage_setting][1];
+          eeAddr = &eConfig.settings;
+        } else {
+          tSettings = stage_setting;
+          eeAddr = &eConfig.eTimer[stage - 2];
+        }
+        eeprom_write_byte(eeAddr, tSettings);
+#else
         switch (stage)
         {
         case 1:
-          tSettings = eeprom_read_byte(&eSettings);
+          tSettings = eeprom_read_byte(&eConfig.settings);
           tSettings &= settings_stage_1[stage_setting][0];
           tSettings |= settings_stage_1[stage_setting][1];
-          eeprom_write_byte(&eSettings, tSettings);
+          eeprom_write_byte(&eConfig.settings, tSettings);
           break;
         case 2:
           // stage 2 and stage 3 (for OUT1 and OUT2 respectively)
           // timer settings depending on beep's count (index in time[] array)
-          eeprom_write_byte(&eTimer1, stage_setting);
+          eeprom_write_byte(&eConfig.eTimer[OUT1], stage_setting);
           break;
         case 3:
-          eeprom_write_byte(&eTimer2, stage_setting);
+          eeprom_write_byte(&eConfig.eTimer[OUT2], stage_setting);
           break;
 #if defined(OUT3)
         case 4:
-          eeprom_write_byte(&eTimer3, stage_setting);
+          eeprom_write_byte(&eConfig.eTimer[OUT3], stage_setting);
 #endif
         }
+#endif
 
         do
         {
@@ -571,18 +597,18 @@ int main(void)
     }
   }
 
-  tSettings = eeprom_read_byte(&eSettings);
+  tSettings = eeprom_read_byte(&eConfig.settings);
 
 #if !defined(OUT3)
   swapOutputs = tSettings & (1 << SWAP_OUTPUTS);
 #endif
 
-  setOutputSettings(&out1, (tSettings >> OUT1_SETTINGS_SHIFT) & CONFIG_SETTINGS_MASK, 1 << OUT1, &eState1, &eTimer1);
+  setOutputSettings(&out1, (tSettings >> OUT1_SETTINGS_SHIFT) & CONFIG_SETTINGS_MASK, 1 << OUT1, INDEX_OUT1);
 
-  setOutputSettings(&out2, (tSettings >> OUT2_SETTINGS_SHIFT) & CONFIG_SETTINGS_MASK, 1 << OUT2, &eState2, &eTimer2);
+  setOutputSettings(&out2, (tSettings >> OUT2_SETTINGS_SHIFT) & CONFIG_SETTINGS_MASK, 1 << OUT2, INDEX_OUT2);
 
 #if defined(OUT3)
-  setOutputSettings(&out3, (tSettings >> OUT3_SETTINGS_SHIFT) & CONFIG_SETTINGS_MASK, 1 << OUT3, &eState3, &eTimer3);
+  setOutputSettings(&out3, (tSettings >> OUT3_SETTINGS_SHIFT) & CONFIG_SETTINGS_MASK, 1 << OUT3, INDEX_OUT3);
 #endif
 
   // Global enable interrupts
