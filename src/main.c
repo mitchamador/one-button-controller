@@ -151,9 +151,9 @@ typedef struct {
 } tEepromConfig;
 
 EEMEM tEepromConfig eConfig = {
-  ((1 << OUT_SOUND) << OUT2_SETTINGS_SHIFT) | (((0 << OUT_MEMORY2) | (1 << OUT_MEMORY1)) << OUT2_SETTINGS_SHIFT),
+  ((1 << OUT_SOUND) << OUT2_SETTINGS_SHIFT) | (((1 << OUT_MEMORY2) | (0 << OUT_MEMORY1)) << OUT2_SETTINGS_SHIFT) | (((0 << OUT_MEMORY2) | (0 << OUT_MEMORY1)) << OUT1_SETTINGS_SHIFT),
   {1, 0, 0},
-  {0, 0, 0}
+  {0, 1, 0}
 };
 
 // timer array in 0,1 s resolution
@@ -554,41 +554,18 @@ int main(void)
 
         // save settings
         stage_setting--;
-#if 1
+
         uint8_t *eeAddr;
         if (stage == 1) {
           tSettings = eeprom_read_byte(&eConfig.settings);
-          tSettings &= settings_stage_1[stage_setting][0];
-          tSettings |= settings_stage_1[stage_setting][1];
+          tSettings &= pgm_read_byte(&settings_stage_1[stage_setting][0]);
+          tSettings |= pgm_read_byte(&settings_stage_1[stage_setting][1]);
           eeAddr = &eConfig.settings;
         } else {
           tSettings = stage_setting;
           eeAddr = &eConfig.eTimer[stage - 2];
         }
         eeprom_write_byte(eeAddr, tSettings);
-#else
-        switch (stage)
-        {
-        case 1:
-          tSettings = eeprom_read_byte(&eConfig.settings);
-          tSettings &= settings_stage_1[stage_setting][0];
-          tSettings |= settings_stage_1[stage_setting][1];
-          eeprom_write_byte(&eConfig.settings, tSettings);
-          break;
-        case 2:
-          // stage 2 and stage 3 (for OUT1 and OUT2 respectively)
-          // timer settings depending on beep's count (index in time[] array)
-          eeprom_write_byte(&eConfig.eTimer[OUT1], stage_setting);
-          break;
-        case 3:
-          eeprom_write_byte(&eConfig.eTimer[OUT2], stage_setting);
-          break;
-#if defined(OUT3)
-        case 4:
-          eeprom_write_byte(&eConfig.eTimer[OUT3], stage_setting);
-#endif
-        }
-#endif
 
         do
         {
