@@ -18,8 +18,16 @@
 #define OUT1 PB1
 #define OUT2 PB2
 
+// add setting for swap out1/out2
+//#define SWAP_OUTPUT_SETTINGS
+
 // enable OUT3 with double click (need RSTDISBL)
 //#define OUT3 PB5
+
+#if defined(SWAP_OUTPUT_SETTINGS) && defined(OUT3)
+// cannot define OUT3 and SWAP_OUTPUT_SETTINGS together
+#undef SWAP_OUTPUT_SETTINGS
+#endif
 
 #define SPK1 PB3
 #define SPK2 PB4
@@ -42,7 +50,9 @@
 #define MAX_STAGE 3
 
 // bits
+#if defined(SWAP_OUTPUT_SETTINGS)
 #define SWAP_OUTPUTS  7
+#endif
 #define OUT_MEMORY1  0
 #define OUT_MEMORY2  1
 #define OUT_SOUND    2
@@ -57,34 +67,36 @@
 // stage 1 settings depending on beep's count
 // stage settings array (mask, value)
 const uint8_t settings_stage_1[][2] PROGMEM = {
-  // 1 => key = OUT2, longkey = OUT1
-  {(uint8_t) ~(1 << SWAP_OUTPUTS), (1 << SWAP_OUTPUTS)},
-  // 2 => key = OUT1, longkey = OUT2
-  {(uint8_t) ~(1 << SWAP_OUTPUTS), 0},
-  // 3 => OUT1 memory enabled (delay 0)
+  // 1 => OUT1 memory enabled (delay 0)
   {(uint8_t) ~(CONFIG_MEMORY_MASK << OUT1_SETTINGS_SHIFT),  1 << OUT1_SETTINGS_SHIFT},
-  // 4 => OUT1 memory enabled (delay 1)
+  // 2 => OUT1 memory enabled (delay 1)
   {(uint8_t) ~(CONFIG_MEMORY_MASK << OUT1_SETTINGS_SHIFT),  2 << OUT1_SETTINGS_SHIFT},
-  // 5 => OUT1 memory enabled (delay 2)
+  // 3 => OUT1 memory enabled (delay 2)
   {(uint8_t) ~(CONFIG_MEMORY_MASK << OUT1_SETTINGS_SHIFT),  3 << OUT1_SETTINGS_SHIFT},
-  // 6 => OUT1 memory disabled
+  // 4 => OUT1 memory disabled
   {(uint8_t) ~(CONFIG_MEMORY_MASK << OUT1_SETTINGS_SHIFT),  0},
-  // 7 => OUT1 sound enabled
+  // 5 => OUT1 sound enabled
   {(uint8_t) ~(CONFIG_SOUND_MASK << OUT1_SETTINGS_SHIFT),   (1 << OUT_SOUND) << OUT1_SETTINGS_SHIFT},
-  // 8 => OUT1 sound disabled
+  // 6 => OUT1 sound disabled
   {(uint8_t) ~(CONFIG_SOUND_MASK << OUT1_SETTINGS_SHIFT),   0},
-  // 9 => OUT2 memory enabled (delay 0)
+  // 7 => OUT2 memory enabled (delay 0)
   {(uint8_t) ~(CONFIG_MEMORY_MASK << OUT2_SETTINGS_SHIFT),  1 << OUT2_SETTINGS_SHIFT},
-  // 10 => OUT2 memory enabled (delay 1)
+  // 8 => OUT2 memory enabled (delay 1)
   {(uint8_t) ~(CONFIG_MEMORY_MASK << OUT2_SETTINGS_SHIFT),  2 << OUT2_SETTINGS_SHIFT},
-  // 11 => OUT2 memory enabled (delay 2)
+  // 9 => OUT2 memory enabled (delay 2)
   {(uint8_t) ~(CONFIG_MEMORY_MASK << OUT2_SETTINGS_SHIFT),  3 << OUT2_SETTINGS_SHIFT},
-  // 12 => OUT2 memory disabled
+  // 10 => OUT2 memory disabled
   {(uint8_t) ~(CONFIG_MEMORY_MASK << OUT2_SETTINGS_SHIFT),  0},
-  // 13 => OUT2 sound enabled
+  // 11 => OUT2 sound enabled
   {(uint8_t) ~(CONFIG_SOUND_MASK << OUT2_SETTINGS_SHIFT),   (1 << OUT_SOUND) << OUT2_SETTINGS_SHIFT},
-  // 14 => OUT2 sound disabled
+  // 12 => OUT2 sound disabled
   {(uint8_t) ~(CONFIG_SOUND_MASK << OUT2_SETTINGS_SHIFT),   0},
+#if defined(SWAP_OUTPUT_SETTINGS)
+  // 13 => key = OUT2, longkey = OUT1
+  {(uint8_t) ~(1 << SWAP_OUTPUTS), (1 << SWAP_OUTPUTS)},
+  // 14 => key = OUT1, longkey = OUT2
+  {(uint8_t) ~(1 << SWAP_OUTPUTS), 0},
+#endif
 };
 
 #else
@@ -143,7 +155,6 @@ const uint8_t settings_stage_1[][2] PROGMEM = {
 #define MEM_ENABLED(out) (out->config & CONFIG_MEMORY_MASK)
 #define SOUND_ENABLED(out) (out->config & CONFIG_SOUND_MASK)
 
-
 typedef struct {
   uint8_t settings;
   uint8_t eTimer[3];
@@ -151,9 +162,13 @@ typedef struct {
 } tEepromConfig;
 
 EEMEM tEepromConfig eConfig = {
-  ((1 << OUT_SOUND) << OUT2_SETTINGS_SHIFT) | (((1 << OUT_MEMORY2) | (0 << OUT_MEMORY1)) << OUT2_SETTINGS_SHIFT) | (((0 << OUT_MEMORY2) | (0 << OUT_MEMORY1)) << OUT1_SETTINGS_SHIFT),
+#if !defined(OUT3)
+  ((1 << OUT_SOUND) << OUT2_SETTINGS_SHIFT) | (((0 << OUT_MEMORY2) | (1 << OUT_MEMORY1)) << OUT2_SETTINGS_SHIFT),
+#else
+  ((1 << OUT_SOUND) << OUT2_SETTINGS_SHIFT) | ((1 << OUT_MEMORY) << OUT2_SETTINGS_SHIFT),
+#endif
   {1, 0, 0},
-  {0, 1, 0}
+  {0, 0, 0}
 };
 
 // timer array in 0,1 s resolution
@@ -214,7 +229,7 @@ outConfig out2;
 outConfig out3;
 #endif
 
-#if !defined(OUT3)
+#if defined(SWAP_OUTPUT_SETTINGS)
 uint8_t swapOutputs;
 #endif
 
@@ -363,8 +378,10 @@ ISR(TIM0_OVF_vect, ISR_NAKED)
 #if defined(OUT3)
       setOutputState(&out1, ON);
       double_click_counter = 0;
-#else
+#elif defined(SWAP_OUTPUT_SETTINGS)
       setOutputState(swapOutputs ? &out1 : &out2, ON);
+#else
+      setOutputState(&out2, ON);
 #endif
     }
   }
@@ -393,9 +410,12 @@ ISR(TIM0_OVF_vect, ISR_NAKED)
       {
         double_click_counter = DOUBLE_CLICK_DELAY;
       }
-#else
+#elif defined(SWAP_OUTPUT_SETTINGS)
       // key press
       setOutputState(swapOutputs ? &out2 : &out1, ON);
+#else
+      // key press
+      setOutputState(&out1, ON);
 #endif
     }
     key_counter = 0;
@@ -423,7 +443,7 @@ void setOutputSettings(outConfig *out, uint8_t config, uint8_t mask, uint8_t ind
     out->sTimer = pgm_read_word(&start_time[config & CONFIG_MEMORY_MASK]);
   }
 #else
-  if (MEM_ENABLED(out) && out->tTimer != 0xFFFF && eeprom_read_byte(eState)) {
+  if (MEM_ENABLED(out) && out->tTimer != 0xFFFF && eeprom_read_byte(&eConfig.eState[index])) {
     PORTB |= out->mask;
   }
 #endif
@@ -576,7 +596,7 @@ int main(void)
 
   tSettings = eeprom_read_byte(&eConfig.settings);
 
-#if !defined(OUT3)
+#if defined(SWAP_OUTPUT_SETTINGS)
   swapOutputs = tSettings & (1 << SWAP_OUTPUTS);
 #endif
 
